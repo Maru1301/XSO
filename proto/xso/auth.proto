@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package xso.auth.v1;
+
+option go_package = "xso/proto/xso/auth/v1;authv1";
+
+service AuthService {
+  rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
+  rpc GetAuthority(GetAuthorityRequest) returns (GetAuthorityResponse);
+}
+
+message ValidateSessionRequest {
+  string session_id = 1;
+}
+
+message ValidateSessionResponse {
+  bool valid = 1;
+  User user = 2;
+}
+
+message GetAuthorityRequest {
+  string user_id = 1;
+}
+
+message GetAuthorityResponse {
+  repeated string roles = 1;
+  repeated string groups = 2;
+  repeated string permissions = 3;
+}
+
+message User {
+  string user_id = 1;
+  string employee_id = 2;
+  string display_name = 3;
+}

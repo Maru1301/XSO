@@ -1,0 +1,7 @@
+go 1.24.2
+
+use (
+	./apps/sample-client
+	./apps/xso-idp
+	./packages/xso-go
+)

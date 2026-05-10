@@ -1,0 +1,27 @@
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Go
+bin/
+dist/
+*.exe
+*.test
+coverage.out
+
+# Node/frontend
+node_modules/
+npm-debug.log*
+pnpm-lock.yaml
+yarn.lock
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Generated artifacts
+tmp/
+*.log

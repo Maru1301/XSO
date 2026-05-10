@@ -1,0 +1,7 @@
+services:
+  xso-idp:
+    build:
+      context: ..
+      dockerfile: deploy/xso-idp.Dockerfile
+    ports:
+      - "8080:8080"
