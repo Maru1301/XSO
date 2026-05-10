@@ -2,4 +2,8 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import './styles.css'
 
-createApp(App).mount('#app')
+const root = document.querySelector<HTMLElement>('#app')
+
+createApp(App, {
+  challengeId: root?.dataset.challengeId ?? '',
+}).mount('#app')

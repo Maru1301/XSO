@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 
+const props = defineProps<{
+  challengeId: string
+}>()
+
 const form = reactive({
   identifier: '',
   password: '',
@@ -27,6 +31,7 @@ async function submitLogin() {
       },
       credentials: 'include',
       body: JSON.stringify({
+        challengeId: props.challengeId,
         identifier: form.identifier.trim(),
         password: form.password,
       }),

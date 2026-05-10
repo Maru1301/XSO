@@ -31,7 +31,7 @@
   - Rejection workflow: reject missing challenge, unknown challenge, expired challenge, reused challenge, inactive service provider, and unsafe return URL.
   - Tests first: cover successful challenge creation, missing challenge rejection, expired challenge rejection, reused challenge rejection, unknown service provider rejection, inactive service provider rejection, and invalid return URL rejection.
 
-- [ ] Implement backend route behavior for `GET /login`.
+- [x] Implement backend route behavior for `GET /login`.
   - Goal: serve the Vue login page only when the request is part of a valid SSO login challenge.
   - Entry point: browser requests `GET /login?challenge=...` after being redirected by XSO or a registered service provider.
   - Request data: challenge ID from query parameter or another backend-approved transport, plus normal browser cookies needed for CSRF/session handling.

@@ -48,3 +48,12 @@ cd frontend/xso-login
 npm install
 npm run dev
 ```
+
+Build the login app before running `xso-idp` locally:
+
+```powershell
+cd frontend/xso-login
+npm run build
+cd ../..
+go run ./apps/xso-idp/cmd/xso-idp
+```
