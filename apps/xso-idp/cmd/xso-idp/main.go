@@ -22,9 +22,12 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.Handle("/login", login.NewLoginPageHandler(challengeService, login.LoginPageHandlerOptions{
-		DistDir: loginDistDir,
-	}))
+	mux.Handle("/login", login.NewLoginHandler(
+		login.NewLoginPageHandler(challengeService, login.LoginPageHandlerOptions{
+			DistDir: loginDistDir,
+		}),
+		login.NewLoginSubmitHandler(challengeService, nil, nil, login.LoginSubmitHandlerOptions{}),
+	))
 	mux.Handle("/login-assets/", login.NewLoginAssetHandler(loginDistDir))
 
 	server := &http.Server{

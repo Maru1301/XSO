@@ -1,7 +1,9 @@
 package login
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -214,10 +216,240 @@ func TestLoginAssetHandlerDoesNotServeBuiltIndex(t *testing.T) {
 	}
 }
 
+func TestLoginSubmitHandlerCompletesLoginForValidCredentials(t *testing.T) {
+	service := newTestChallengeService(time.Now())
+	challenge, err := service.CreateChallenge(context.Background(), "sample-client", "https://sample.example.com/auth/callback")
+	if err != nil {
+		t.Fatalf("CreateChallenge returned error: %v", err)
+	}
+	authenticator := &stubAuthenticator{
+		user: LoginUser{
+			ID:          "user-1",
+			DisplayName: "Ada Lovelace",
+		},
+	}
+	sessionIssuer := &stubSessionIssuer{
+		session: LoginSession{
+			Cookies: []http.Cookie{{
+				Name:     "xso_session",
+				Value:    "session-1",
+				HttpOnly: true,
+				Secure:   true,
+				SameSite: http.SameSiteLaxMode,
+			}},
+		},
+	}
+	handler := NewLoginSubmitHandler(service, authenticator, sessionIssuer, LoginSubmitHandlerOptions{})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, newJSONLoginRequest(challenge.ID, "ada", "correct-password"))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if authenticator.credentials.Identifier != "ada" || authenticator.credentials.Password != "correct-password" {
+		t.Fatalf("credentials = %#v", authenticator.credentials)
+	}
+	if sessionIssuer.request.ChallengeID != challenge.ID || sessionIssuer.request.User.ID != "user-1" {
+		t.Fatalf("session request = %#v", sessionIssuer.request)
+	}
+	if cookies := response.Result().Cookies(); len(cookies) != 1 || cookies[0].Name != "xso_session" {
+		t.Fatalf("cookies = %#v, want xso_session", cookies)
+	}
+
+	var body loginSubmitResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response JSON decode failed: %v", err)
+	}
+	if body.RedirectURL != "https://sample.example.com/auth/callback" {
+		t.Fatalf("redirectUrl = %q", body.RedirectURL)
+	}
+
+	if _, err := service.ValidateChallenge(context.Background(), challenge.ID); !errors.Is(err, ErrUsedChallenge) {
+		t.Fatalf("ValidateChallenge error = %v, want ErrUsedChallenge", err)
+	}
+}
+
+func TestLoginSubmitHandlerRejectsMissingCredentials(t *testing.T) {
+	service := newTestChallengeService(time.Now())
+	challenge, err := service.CreateChallenge(context.Background(), "sample-client", "https://sample.example.com/auth/callback")
+	if err != nil {
+		t.Fatalf("CreateChallenge returned error: %v", err)
+	}
+	authenticator := &recordingAuthenticator{}
+	handler := NewLoginSubmitHandler(service, authenticator, &stubSessionIssuer{}, LoginSubmitHandlerOptions{})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, newJSONLoginRequest(challenge.ID, "ada", ""))
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+	if authenticator.called {
+		t.Fatal("authenticator was called for missing credentials")
+	}
+}
+
+func TestLoginSubmitHandlerRejectsInvalidCredentialsWithGenericError(t *testing.T) {
+	service := newTestChallengeService(time.Now())
+	challenge, err := service.CreateChallenge(context.Background(), "sample-client", "https://sample.example.com/auth/callback")
+	if err != nil {
+		t.Fatalf("CreateChallenge returned error: %v", err)
+	}
+	handler := NewLoginSubmitHandler(service, &stubAuthenticator{err: ErrInvalidCredentials}, &stubSessionIssuer{}, LoginSubmitHandlerOptions{})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, newJSONLoginRequest(challenge.ID, "unknown-user", "bad-password"))
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+	body := response.Body.String()
+	if strings.Contains(body, "unknown-user") || strings.Contains(body, "ErrInvalidCredentials") {
+		t.Fatalf("response leaks credential detail: %s", body)
+	}
+	if _, err := service.ValidateChallenge(context.Background(), challenge.ID); err != nil {
+		t.Fatalf("challenge should remain reusable after invalid credentials, got %v", err)
+	}
+}
+
+func TestLoginSubmitHandlerRejectsExpiredChallenge(t *testing.T) {
+	now := time.Date(2026, 5, 10, 15, 0, 0, 0, time.UTC)
+	service := newTestChallengeService(now)
+	challenge, err := service.CreateChallenge(context.Background(), "sample-client", "https://sample.example.com/auth/callback")
+	if err != nil {
+		t.Fatalf("CreateChallenge returned error: %v", err)
+	}
+	service.clock = func() time.Time {
+		return now.Add(5*time.Minute + time.Second)
+	}
+	handler := NewLoginSubmitHandler(service, &stubAuthenticator{}, &stubSessionIssuer{}, LoginSubmitHandlerOptions{})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, newJSONLoginRequest(challenge.ID, "ada", "correct-password"))
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestLoginSubmitHandlerRejectsDuplicateSubmission(t *testing.T) {
+	service := newTestChallengeService(time.Now())
+	challenge, err := service.CreateChallenge(context.Background(), "sample-client", "https://sample.example.com/auth/callback")
+	if err != nil {
+		t.Fatalf("CreateChallenge returned error: %v", err)
+	}
+	handler := NewLoginSubmitHandler(service, &stubAuthenticator{}, &stubSessionIssuer{}, LoginSubmitHandlerOptions{})
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, newJSONLoginRequest(challenge.ID, "ada", "correct-password"))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first status = %d, want %d", first.Code, http.StatusOK)
+	}
+
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, newJSONLoginRequest(challenge.ID, "ada", "correct-password"))
+	if second.Code != http.StatusNotFound {
+		t.Fatalf("second status = %d, want %d", second.Code, http.StatusNotFound)
+	}
+}
+
+func TestLoginSubmitHandlerRejectsMalformedJSON(t *testing.T) {
+	handler := NewLoginSubmitHandler(newTestChallengeService(time.Now()), &stubAuthenticator{}, &stubSessionIssuer{}, LoginSubmitHandlerOptions{})
+
+	request := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader("{"))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestLoginHandlerRoutesGetAndPost(t *testing.T) {
+	service := newTestChallengeService(time.Now())
+	challenge, err := service.CreateChallenge(context.Background(), "sample-client", "https://sample.example.com/auth/callback")
+	if err != nil {
+		t.Fatalf("CreateChallenge returned error: %v", err)
+	}
+	handler := NewLoginHandler(
+		NewLoginPageHandler(service, LoginPageHandlerOptions{DistDir: newTestLoginDist(t)}),
+		NewLoginSubmitHandler(service, &stubAuthenticator{}, &stubSessionIssuer{}, LoginSubmitHandlerOptions{}),
+	)
+
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, httptest.NewRequest(http.MethodGet, "/login?challenge="+challenge.ID, nil))
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d", getResponse.Code, http.StatusOK)
+	}
+
+	postResponse := httptest.NewRecorder()
+	handler.ServeHTTP(postResponse, newJSONLoginRequest(challenge.ID, "ada", "correct-password"))
+	if postResponse.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want %d", postResponse.Code, http.StatusOK)
+	}
+}
+
 type failingChallengeValidator struct{}
 
 func (failingChallengeValidator) ValidateChallenge(context.Context, string) (Challenge, error) {
 	return Challenge{}, errors.New("database unavailable")
+}
+
+type stubAuthenticator struct {
+	credentials LoginCredentials
+	user        LoginUser
+	err         error
+}
+
+func (a *stubAuthenticator) Authenticate(_ context.Context, credentials LoginCredentials) (LoginUser, error) {
+	a.credentials = credentials
+	if a.err != nil {
+		return LoginUser{}, a.err
+	}
+	if a.user.ID == "" {
+		return LoginUser{ID: "user-1"}, nil
+	}
+	return a.user, nil
+}
+
+type recordingAuthenticator struct {
+	called bool
+}
+
+func (a *recordingAuthenticator) Authenticate(_ context.Context, _ LoginCredentials) (LoginUser, error) {
+	a.called = true
+	return LoginUser{}, nil
+}
+
+type stubSessionIssuer struct {
+	request LoginSessionRequest
+	session LoginSession
+	err     error
+}
+
+func (i *stubSessionIssuer) IssueSession(_ context.Context, request LoginSessionRequest) (LoginSession, error) {
+	i.request = request
+	if i.err != nil {
+		return LoginSession{}, i.err
+	}
+	return i.session, nil
+}
+
+func newJSONLoginRequest(challengeID string, identifier string, password string) *http.Request {
+	body, err := json.Marshal(loginSubmitRequest{
+		ChallengeID: challengeID,
+		Identifier:  identifier,
+		Password:    password,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	return request
 }
 
 func newTestLoginDist(t *testing.T) string {

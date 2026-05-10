@@ -10,6 +10,7 @@
 - [x] TDD rule added: write or update failing tests before production code.
 - [x] Edge-case rule added: identify meaningful edge cases and failure modes before implementation.
 - [x] Login page access rule added: direct navigation must be rejected by backend validation.
+- [x] Backend `POST /login` route behavior implemented behind explicit authenticator and session issuer interfaces.
 
 ## Active Architecture Decisions
 
@@ -40,7 +41,7 @@
   - Rejection workflow: direct access to `/login`, missing challenge, invalid challenge, expired challenge, reused challenge, and inactive service provider must be rejected by backend validation.
   - Tests first: cover valid login page access, direct navigation rejection, missing challenge rejection, expired challenge rejection, reused challenge rejection, and inactive service provider rejection.
 
-- [ ] Implement backend route behavior for `POST /login`.
+- [x] Implement backend route behavior for `POST /login`.
   - Goal: authenticate credentials for a valid challenge, create the appropriate session or assertion state, and return the browser to the registered service provider.
   - Entry point: Vue login form submits credentials to `POST /login` with the active challenge reference.
   - Request data: challenge ID, account identifier, password, CSRF token if cookie-based state is used, and browser cookies needed by the flow.
@@ -48,6 +49,18 @@
   - Success workflow: set secure server-managed session state or complete the assertion exchange without exposing raw tokens in URLs or browser storage.
   - Rejection workflow: reject missing credentials, invalid credentials, expired challenge, reused challenge, duplicate submission, invalid CSRF token, locked/disabled user, and unsafe redirect target.
   - Tests first: cover successful login, missing credentials rejection, generic invalid credential error, expired challenge rejection, duplicate submission rejection, unsafe redirect rejection, and no account-existence leakage.
+  - Implemented route workflow: `POST /login` accepts JSON credentials, validates the challenge, delegates credential verification to a backend authenticator interface, delegates session/assertion creation to a backend session issuer interface, marks the challenge as used, sets issuer-provided cookies, and returns a backend-validated `redirectUrl` for the Vue page to navigate to.
+  - Implemented rejection behavior: malformed JSON and missing fields return generic request errors, invalid or disabled users return a generic unauthorized error without account-existence leakage, expired or reused challenges are rejected by challenge validation, and unexpected backend failures return server errors.
+  - Remaining implementation dependency: real credential storage, CSRF binding, and durable session/assertion issuance still need their own data model and backend implementations before production login can succeed outside tests.
+
+- [ ] Implement concrete credential and session backend.
+  - Goal: replace the current `POST /login` test doubles and unconfigured runtime wiring with a real backend-owned authentication and session/assertion implementation.
+  - Entry point: provide concrete implementations of the login authenticator and session issuer interfaces used by `POST /login`.
+  - Data construction: user ID, account identifiers, password verifier metadata, disabled/locked status, session ID or assertion ID, service provider ID, challenge ID, expiration timestamp, issued-at timestamp, and secure cookie attributes.
+  - Authentication workflow: look up the account by normalized identifier, verify the password using a password hashing strategy, reject disabled or locked users, avoid account-existence leakage, and return a stable backend user identity.
+  - Session workflow: create a server-managed session or assertion record, bind it to the authenticated user and service provider, set secure `HttpOnly` cookie state when applicable, and expose only the redirect target needed by the browser.
+  - Rejection workflow: reject missing users, invalid password, disabled user, locked user, expired challenge, duplicate challenge use, session persistence failure, and unsafe redirect targets with generic browser-facing errors.
+  - Tests first: cover valid credential authentication, generic invalid credential behavior, disabled/locked users, password verifier failure, secure cookie attributes, session persistence failure, and no token leakage in JSON responses or browser storage.
 
 - [ ] Define the full service provider registration workflow.
   - Goal: a new service must be registered with XSO before it can send users into the SSO login flow.

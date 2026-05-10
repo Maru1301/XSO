@@ -43,7 +43,13 @@ async function submitLogin() {
       return
     }
 
-    window.location.assign('/')
+    const result = await response.json() as { redirectUrl?: string }
+    if (!result.redirectUrl) {
+      errorMessage.value = 'Unable to sign in right now.'
+      return
+    }
+
+    window.location.assign(result.redirectUrl)
   } catch {
     errorMessage.value = 'Unable to sign in right now.'
   } finally {
