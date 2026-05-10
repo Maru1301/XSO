@@ -20,6 +20,7 @@ Project source notes live outside this repo at `C:\Users\HWNQ\workspace\Note.md\
 
 - Apply test-driven development: write or update a failing test that captures the intended behavior before implementing production code, then make the smallest change needed to pass and refactor with tests green.
 - Before implementing a feature, identify meaningful edge cases and failure modes, then cover the important ones in tests or explicitly document why they are out of scope.
+- If requirements, behavior, ownership, or security boundaries are ambiguous, ask for clarification before implementation.
 - Preserve the security boundary between browser-facing HTTP endpoints and internal gRPC/service contracts.
 - Keep authentication logic on the backend. The login frontend must not verify passwords, evaluate permissions, sign tokens, or store session tokens in browser storage.
 - The login page must only be accessible through a valid SSO service redirect/challenge created by XSO or a registered service provider. Direct user navigation to the login page must be rejected by backend validation, not merely hidden in the frontend.

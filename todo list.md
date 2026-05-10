@@ -22,7 +22,7 @@
 
 ## Next Work
 
-- [ ] Define the login challenge model.
+- [x] Define the login challenge model.
   - Goal: represent a short-lived login attempt created by XSO after a registered service provider asks XSO to authenticate a user.
   - Creation entry point: a service provider redirects or calls XSO with its service provider ID and requested return URL.
   - Challenge data: challenge ID, service provider ID, return URL, expiration time, used status, created timestamp, optional CSRF token or nonce.
