@@ -67,6 +67,12 @@ input:focus {
   outline: 3px solid rgb(15 118 110 / 16%);
 }
 
+.error {
+  margin: 0;
+  color: #b42318;
+  font-size: 14px;
+}
+
 button {
   min-height: 44px;
   border: 0;
@@ -78,6 +84,11 @@ button {
   cursor: pointer;
 }
 
-button:hover {
+button:hover:not(:disabled) {
   background: #115e59;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
 }

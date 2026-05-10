@@ -11,7 +11,7 @@ apps/
   xso-idp/          Identity Provider service
   sample-client/    Example service integrating with XSO
 frontend/
-  xso-login/        XSO-hosted login page
+  xso-login/        Vue 3 XSO-hosted login page
 packages/
   xso-go/           Reusable Go SDK
 proto/
@@ -41,4 +41,10 @@ go run ./apps/xso-idp/cmd/xso-idp
 go run ./apps/sample-client/cmd/sample-client
 ```
 
-Open the static login prototype at `frontend/xso-login/public/index.html`.
+Run the Vue 3 login app:
+
+```powershell
+cd frontend/xso-login
+npm install
+npm run dev
+```
