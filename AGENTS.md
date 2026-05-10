@@ -22,6 +22,7 @@ Project source notes live outside this repo at `C:\Users\HWNQ\workspace\Note.md\
 - Before implementing a feature, identify meaningful edge cases and failure modes, then cover the important ones in tests or explicitly document why they are out of scope.
 - Preserve the security boundary between browser-facing HTTP endpoints and internal gRPC/service contracts.
 - Keep authentication logic on the backend. The login frontend must not verify passwords, evaluate permissions, sign tokens, or store session tokens in browser storage.
+- The login page must only be accessible through a valid SSO service redirect/challenge created by XSO or a registered service provider. Direct user navigation to the login page must be rejected by backend validation, not merely hidden in the frontend.
 - Use Vue 3 for the login frontend. Keep it focused on browser interaction, validation states, and calls to browser-facing HTTP endpoints.
 - Prefer small, explicit Go packages over broad abstractions while the project is young.
 - Keep the Go SDK framework-agnostic; standard `net/http` support can be the first integration target.
