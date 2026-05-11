@@ -5,16 +5,26 @@ import (
 	"time"
 
 	"xso/packages/xso-go/config"
+	xsoerrors "xso/packages/xso-go/errors"
 	"xso/packages/xso-go/session"
 )
 
 type Config = config.Config
 
 type Client struct {
-	config Config
+	config    Config
+	validator session.Validator
 }
 
-func NewClient(cfg Config) *Client {
+type ClientOption func(*Client)
+
+func WithSessionValidator(validator session.Validator) ClientOption {
+	return func(c *Client) {
+		c.validator = validator
+	}
+}
+
+func NewClient(cfg Config, options ...ClientOption) *Client {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 5 * time.Second
 	}
@@ -22,35 +32,44 @@ func NewClient(cfg Config) *Client {
 		cfg.SessionCookieName = "xso_session"
 	}
 
-	return &Client{config: cfg}
+	client := &Client{config: cfg}
+	for _, option := range options {
+		option(client)
+	}
+
+	return client
 }
 
 func (c *Client) Config() Config {
 	return c.config
 }
 
-func (c *Client) ValidateSession(_ context.Context, sessionID string) (session.ValidationResult, error) {
+func (c *Client) ValidateSession(ctx context.Context, sessionID string) (session.ValidationResult, error) {
 	if sessionID == "" {
 		return session.ValidationResult{}, ErrUnauthorized()
 	}
+	if c.validator == nil {
+		return session.ValidationResult{}, ErrUnauthorized()
+	}
 
-	// Placeholder until the gRPC validation boundary is implemented.
-	return session.ValidationResult{
-		User: session.User{
-			UserID:      "local-dev",
-			DisplayName: "Local Dev User",
-		},
-	}, nil
+	validationCtx := ctx
+	cancel := func() {}
+	if c.config.Timeout > 0 {
+		validationCtx, cancel = context.WithTimeout(ctx, c.config.Timeout)
+	}
+	defer cancel()
+
+	result, err := c.validator.ValidateSession(validationCtx, session.Credential{Token: sessionID})
+	if err != nil {
+		return session.ValidationResult{}, err
+	}
+	if result.User.UserID == "" {
+		return session.ValidationResult{}, ErrUnauthorized()
+	}
+
+	return result, nil
 }
 
 func ErrUnauthorized() error {
-	return errorsUnauthorized
-}
-
-var errorsUnauthorized = errUnauthorized{}
-
-type errUnauthorized struct{}
-
-func (errUnauthorized) Error() string {
-	return "unauthorized"
+	return xsoerrors.ErrUnauthorized
 }

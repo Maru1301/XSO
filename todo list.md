@@ -15,6 +15,8 @@
 - [x] Backend login-result code exchange endpoint added for service backends.
 - [x] Full service provider registration workflow defined in `docs/architecture/service-provider-registration.md`.
 - [x] Backend admin service provider registration implemented with in-memory storage.
+- [x] SDK placeholder session validation replaced with an explicit validator interface.
+- [x] CI-friendly verification command added.
 
 ## Active Architecture Decisions
 
@@ -126,7 +128,7 @@
   - Implemented coverage: tests verify initial render, required-field validation without backend calls, pending disabled state, trimmed identifier submission with challenge ID and `credentials: include`, password clearing after invalid credentials, generic network/service error, redirect to backend-provided URL, missing redirect URL handling, and no writes to browser storage.
   - Verification: `npm run test` and `npm run build` pass from `frontend/xso-login`.
 
-- [ ] Replace placeholder SDK session validation with a real interface.
+- [x] Replace placeholder SDK session validation with a real interface.
   - Goal: make `packages/xso-go` validate sessions through an explicit backend boundary instead of hardcoded placeholder behavior.
   - SDK entry point: application code creates an XSO client and installs middleware around protected `net/http` routes.
   - Interface data: session credential, request context, validation result, user identity, roles, groups, permissions, and typed validation errors.
@@ -134,8 +136,14 @@
   - Rejection workflow: missing session, empty session, expired session, invalid token, backend validation failure, timeout, and malformed validator response must become unauthorized responses without leaking internals.
   - Extensibility workflow: keep core validation independent from web frameworks; `net/http` remains the first adapter.
   - Tests first: cover empty session rejection, valid session context injection, expired session rejection, validator error mapping, timeout/error behavior, and framework-independent validator use.
+  - Implemented SDK interface: `session.Validator` accepts a typed `session.Credential` and returns `session.ValidationResult`; `session.ValidatorFunc` supports lightweight adapters.
+  - Implemented client wiring: `xso.NewClient` accepts `xso.WithSessionValidator`, applies configured validation timeout, rejects empty session credentials, rejects missing validators, and rejects malformed validator results without creating a fake local user.
+  - Implemented context data: validated users now include roles, groups, and permissions before middleware stores them in request context.
+  - Implemented middleware behavior: missing or empty cookies, expired sessions, invalid tokens, backend failures, and timeouts all become generic `401 unauthorized` responses.
+  - Sample client update: the sample app now injects its own local development validator instead of relying on SDK placeholder behavior.
+  - Verification: SDK tests cover empty session rejection, valid context injection, typed validation errors, timeout behavior, malformed validator results, and framework-independent validator use.
 
-- [ ] Add CI-friendly verification commands.
+- [x] Add CI-friendly verification commands.
   - Goal: define one repeatable local and CI verification path for backend, SDK, frontend, and generated assets.
   - Entry point: root-level documentation first; later add scripts or CI workflow files.
   - Go workflow: run `go work sync`, then `go test ./apps/xso-idp/... ./apps/sample-client/... ./packages/xso-go/...`.
@@ -143,6 +151,10 @@
   - Generated asset workflow: when protobuf generation is added, include a check that generated files are up to date.
   - Rejection workflow: CI must fail on Go test failures, frontend type/build failures, missing lockfile consistency, or stale generated files.
   - Tests first: for script changes, add or document a local dry-run command and verify it fails clearly when a required step fails.
+  - Implemented command: `./scripts/verify.ps1` runs Go workspace sync, Go tests, frontend lockfile install, frontend tests, and frontend production build.
+  - Implemented local fast path: `./scripts/verify.ps1 -SkipFrontendInstall` skips `npm ci` for repeated local runs after dependencies are already installed.
+  - Documentation: `README.md`, `AGENTS.md`, and `docs/development/verification.md` now point to the verification command and focused backend/frontend alternatives.
+  - Generated asset status: the script reports that generated protobuf checks are not configured yet; when protobuf generation is added, stale generated files should become a failing check.
 
 ## Later Work
 

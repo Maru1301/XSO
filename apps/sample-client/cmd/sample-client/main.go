@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
 
 	xso "xso/packages/xso-go"
 	"xso/packages/xso-go/middleware"
+	"xso/packages/xso-go/session"
 )
 
 func main() {
@@ -15,7 +17,7 @@ func main() {
 		Timeout:           3 * time.Second,
 		ServiceName:       "sample-client",
 		SessionCookieName: "xso_session",
-	})
+	}, xso.WithSessionValidator(sampleValidator{}))
 
 	mux := http.NewServeMux()
 	mux.Handle("/profile", middleware.Authenticate(client)(http.HandlerFunc(profileHandler)))
@@ -34,6 +36,21 @@ func main() {
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		panic(err)
 	}
+}
+
+type sampleValidator struct{}
+
+func (sampleValidator) ValidateSession(_ context.Context, credential session.Credential) (session.ValidationResult, error) {
+	if credential.Token == "" {
+		return session.ValidationResult{}, xso.ErrUnauthorized()
+	}
+
+	return session.ValidationResult{
+		User: session.User{
+			UserID:      "local-dev",
+			DisplayName: "Local Dev User",
+		},
+	}, nil
 }
 
 func profileHandler(w http.ResponseWriter, r *http.Request) {

@@ -30,8 +30,13 @@ docs/               Architecture and implementation notes
 ## Development
 
 ```powershell
-go work sync
-go test ./apps/xso-idp/... ./apps/sample-client/... ./packages/xso-go/...
+./scripts/verify.ps1
+```
+
+For a faster local rerun after frontend dependencies are already installed:
+
+```powershell
+./scripts/verify.ps1 -SkipFrontendInstall
 ```
 
 Run app modules directly:

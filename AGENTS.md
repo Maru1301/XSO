@@ -31,5 +31,6 @@ Project source notes live outside this repo at `C:\Users\HWNQ\workspace\Note.md\
 
 ## Verification
 
-- Run `go test ./apps/xso-idp/... ./apps/sample-client/... ./packages/xso-go/...` from the workspace root.
-- For frontend changes, prefer static validation first unless a package manager workflow has been added.
+- Run `./scripts/verify.ps1` from the workspace root for the full local/CI verification path.
+- For backend-only changes, `go test ./apps/xso-idp/... ./apps/sample-client/... ./packages/xso-go/...` is the focused Go verification command.
+- For frontend-only changes, run `npm run test` and `npm run build` from `frontend/xso-login`.
