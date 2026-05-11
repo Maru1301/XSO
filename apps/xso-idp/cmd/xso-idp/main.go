@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 
 	"xso/apps/xso-idp/internal/login"
 )
@@ -13,18 +18,56 @@ import (
 func main() {
 	loginDistDir := filepath.Clean("frontend/xso-login/dist")
 	adminToken := os.Getenv("XSO_ADMIN_TOKEN")
-	providerStore := login.NewMemoryServiceProviderStore(nil)
+
+	var providerStore login.ServiceProviderRegistry = login.NewMemoryServiceProviderStore(nil)
+	var challengeStore login.ChallengeStore = login.NewMemoryChallengeStore()
+	var authenticator login.LoginAuthenticator = login.NewMemoryCredentialAuthenticator(nil)
+	var sessionStore login.IDPSessionStore = login.NewMemoryIDPSessionStore()
+	var resultStore login.LoginResultStore = login.NewMemoryLoginResultStore()
+
+	if databaseURL := os.Getenv("XSO_DATABASE_URL"); databaseURL != "" {
+		db, err := sql.Open("postgres", databaseURL)
+		if err != nil {
+			panic(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := db.PingContext(ctx); err != nil {
+			panic(err)
+		}
+
+		postgresStore := login.NewPostgreSQLStore(db)
+		providerStore = postgresStore
+		authenticator = login.NewPostgreSQLCredentialAuthenticator(db)
+		sessionStore = postgresStore
+		resultStore = postgresStore
+	}
+
+	if redisAddr := os.Getenv("XSO_REDIS_ADDR"); redisAddr != "" {
+		redisClient := redis.NewClient(&redis.Options{
+			Addr:     redisAddr,
+			Password: os.Getenv("XSO_REDIS_PASSWORD"),
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			panic(err)
+		}
+
+		challengeStore = login.NewRedisChallengeStore(redisClient, login.RedisCacheOptions{})
+		sessionStore = login.NewCachedIDPSessionStore(sessionStore, login.NewRedisIDPSessionStore(redisClient, login.RedisCacheOptions{}))
+	}
+
 	serviceProviderRegistrar := login.NewServiceProviderRegistrationService(providerStore, login.ServiceProviderRegistrationOptions{})
 	challengeService := login.NewChallengeService(
 		providerStore,
-		login.NewMemoryChallengeStore(),
+		challengeStore,
 		login.ChallengeServiceOptions{},
 	)
-	authenticator := login.NewMemoryCredentialAuthenticator(nil)
 	serviceAuthenticator := login.NewMemoryServiceProviderAuthenticator(providerStore)
 	sessionIssuer := login.NewLoginResultIssuer(
-		login.NewMemoryIDPSessionStore(),
-		login.NewMemoryLoginResultStore(),
+		sessionStore,
+		resultStore,
 		login.LoginResultIssuerOptions{},
 	)
 

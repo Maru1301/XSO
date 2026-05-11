@@ -1,6 +1,6 @@
 module xso/apps/sample-client
 
-go 1.24.2
+go 1.26.3
 
 require xso/packages/xso-go v0.0.0
 

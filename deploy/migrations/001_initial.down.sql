@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS role_permissions;
+DROP TABLE IF EXISTS user_roles;
+DROP TABLE IF EXISTS permissions;
+DROP TABLE IF EXISTS roles;
+DROP TABLE IF EXISTS login_result_codes;
+DROP TABLE IF EXISTS idp_sessions;
+DROP TABLE IF EXISTS login_challenges;
+DROP TABLE IF EXISTS service_provider_return_urls;
+DROP TABLE IF EXISTS service_providers;
+DROP TABLE IF EXISTS user_credentials;
+DROP TABLE IF EXISTS user_identifiers;
+DROP TABLE IF EXISTS users;

@@ -15,8 +15,13 @@
 - [x] Backend login-result code exchange endpoint added for service backends.
 - [x] Full service provider registration workflow defined in `docs/architecture/service-provider-registration.md`.
 - [x] Backend admin service provider registration implemented with in-memory storage.
+- [x] Frontend login page state tests added.
 - [x] SDK placeholder session validation replaced with an explicit validator interface.
 - [x] CI-friendly verification command added.
+- [x] Root verification script passes with backend tests, frontend tests, frontend build, and lockfile install.
+- [x] PostgreSQL schema draft added for users, sessions, service providers, roles, and permissions.
+- [x] Redis-backed challenge/session cache design added.
+- [x] PostgreSQL and Redis backend adapters implemented.
 
 ## Active Architecture Decisions
 
@@ -28,6 +33,17 @@
 - The Go SDK should stay framework-agnostic, with `net/http` support as the first adapter.
 
 ## Next Work
+
+- [ ] Add protobuf generation workflow.
+  - Goal: generate typed Go code from `proto/xso/auth.proto` without hand-editing generated files.
+  - Entry point: documented generation command or script from the repo root, integrated into `./scripts/verify.ps1` after generation tooling is selected.
+  - Tooling data: protoc version, Go protobuf plugins, output directories, package names, and generated file ownership.
+  - Generation workflow: install or document required tools, run generation, write generated files to the expected Go package path, and include generated files in verification.
+  - Verification workflow: add a CI-friendly check that fails when generated protobuf output is missing or stale.
+  - Rejection workflow: fail when protoc/plugins are missing, generated code is stale, package paths do not match module paths, or generated files are manually edited.
+  - Tests first: add or document a dry-run/staleness check before relying on generated files in runtime code.
+
+## Completed Work
 
 - [x] Define the login challenge model.
   - Goal: represent a short-lived login attempt created by XSO after a registered service provider asks XSO to authenticate a user.
@@ -156,31 +172,51 @@
   - Documentation: `README.md`, `AGENTS.md`, and `docs/development/verification.md` now point to the verification command and focused backend/frontend alternatives.
   - Generated asset status: the script reports that generated protobuf checks are not configured yet; when protobuf generation is added, stale generated files should become a failing check.
 
-## Later Work
-
-- [ ] Add protobuf generation workflow.
-  - Goal: generate typed Go code from `proto/xso/auth.proto` without hand-editing generated files.
-  - Entry point: documented generation command or script from the repo root.
-  - Tooling data: protoc version, Go protobuf plugins, output directories, package names, and generated file ownership.
-  - Generation workflow: install or document required tools, run generation, write generated files to the expected Go package path, and include generated files in verification.
-  - Rejection workflow: fail when protoc/plugins are missing, generated code is stale, package paths do not match module paths, or generated files are manually edited.
-  - Tests first: add a verification step that detects stale generated protobuf output.
-
-- [ ] Add PostgreSQL schema draft for users, sessions, service providers, roles, and permissions.
+- [x] Add PostgreSQL schema draft for users, sessions, service providers, roles, and permissions.
   - Goal: define the first durable data model for authentication, service registration, sessions, and authorization.
-  - Entry point: SQL migration files or schema docs before wiring runtime database access.
-  - Schema data: users, credentials, sessions, service providers, allowed return URLs, roles, permissions, user-role links, role-permission links, and audit-relevant timestamps.
-  - Migration workflow: create tables with primary keys, unique constraints, foreign keys, indexes, and explicit nullable fields.
-  - Rejection workflow: reject duplicate users, duplicate service provider IDs, duplicate allowed return URLs per service, invalid foreign keys, and dangling role/permission links.
-  - Tests first: when migrations are executable, cover migration up/down behavior and important uniqueness/foreign-key constraints.
+  - Schema document: `docs/backend/postgresql-schema.md`.
+  - Entry point: schema-first documentation before wiring runtime database access or executable migrations.
+  - User data construction: `users` stores stable user identity, display name, primary email, disabled state, lockout state, and timestamps. `user_identifiers` stores normalized email, username, or employee ID login identifiers. `user_credentials` stores password verifier metadata only.
+  - Service provider data construction: `service_providers` stores service ID, display name, active status, secret verifier metadata, and timestamps. `service_provider_return_urls` stores exact callback URLs with uniqueness scoped to the service provider.
+  - Login state construction: `login_challenges` stores short-lived challenge IDs, service provider audience, return URL, optional CSRF token hash, expiry, used timestamp, and creation timestamp. `idp_sessions` stores hashed opaque session cookie values, user ownership, absolute expiry, idle expiry, revocation timestamp, and last-seen metadata. `login_result_codes` stores hashed one-time callback codes, service provider audience, user/session ownership, hashed access token, expiry, and used timestamp.
+  - Authorization data construction: `roles` and `permissions` support global scope or service-provider scope. `user_roles` and `role_permissions` enforce assignments through foreign keys and composite primary keys.
+  - Migration workflow: future executable migrations should enable `pgcrypto` or replace UUID defaults with application-generated UUIDs, then create tables with primary keys, check constraints, unique constraints, foreign keys, partial indexes for global names, and lookup indexes for expiry and ownership queries.
+  - Runtime workflow: login identifier lookup reads `user_identifiers`, password verification reads `user_credentials`, challenge creation reads registered service providers and exact return URLs, login creates hashed session and login-result rows, token exchange consumes one login-result code, and SDK/session validation later reads session or access-token validation data.
+  - Rejection workflow: reject duplicate primary emails, duplicate normalized identifiers, multiple password credentials for one user, duplicate service provider IDs, duplicate return URLs per service, invalid service provider ID format, dangling challenge/session/login-result references, duplicate global or scoped roles, duplicate global or scoped permissions, and dangling user-role or role-permission links.
+  - Edge cases: application code still owns URL parsing, secret generation, identifier normalization, and token hashing; database constraints provide a second boundary. Role/permission cross-scope consistency may need triggers or separate scoped join tables once authorization rules are finalized.
+  - Tests first: when migrations become executable, add migration tests for duplicate identifiers, service provider uniqueness, return URL uniqueness, session/code uniqueness, foreign-key rejection, global/scoped role uniqueness, global/scoped permission uniqueness, and dangling assignment rejection.
 
-- [ ] Add Redis-backed challenge/session cache design.
+- [x] Add Redis-backed challenge/session cache design.
   - Goal: support short-lived login challenges, replay protection, session cache, and rate-limit counters without making the database the only hot path.
-  - Entry point: cache interface design before introducing a Redis client dependency.
-  - Cache data: challenge IDs, used challenge markers, session validation cache entries, replay-prevention nonces, and rate-limit counters.
-  - Cache workflow: write challenge/session entries with TTLs, read before database fallback where appropriate, atomically mark one-time challenge use, and expire sensitive state automatically.
-  - Rejection workflow: handle cache miss, expired keys, duplicate challenge use, Redis timeout, Redis outage, and inconsistent cache/database state.
-  - Tests first: use an interface-backed fake cache to cover TTL behavior, one-time-use behavior, cache miss fallback, and Redis failure fallback rules.
+  - Design document: `docs/backend/redis-cache-design.md`.
+  - Entry point: behavior-oriented cache interface design before introducing a Redis client dependency.
+  - Cache ownership: Redis owns hot, short-lived, replay-sensitive state only. PostgreSQL remains the durable source of truth for users, service providers, sessions, login-result metadata, roles, permissions, and audit-relevant records.
+  - Key construction: use namespaced versioned keys for challenges, used challenge markers, session validation entries, login-result replay markers, CSRF or nonce markers, and rate-limit counters.
+  - Challenge workflow: create challenges after durable service provider and return URL validation, store challenge data with an explicit TTL, load from Redis first for `GET /login`, and atomically consume the challenge during `POST /login`.
+  - Session workflow: create durable session state first, store only hashed opaque session cookie values in Redis, use Redis as a validation cache, fall back to durable storage on cache miss, and delete cached session data during logout or revocation.
+  - Login-result replay workflow: authenticate the service provider, check the hashed code replay marker, validate durable login-result metadata, atomically mark the code used, then return the access token only to the backend service.
+  - Rate-limit workflow: increment service-provider, identifier, IP, and token-exchange counters with expirations; hash identifiers and IP addresses before storing them; keep responses generic to avoid account-existence leaks.
+  - TTL workflow: every sensitive key must have an explicit expiration. Challenge keys use the challenge lifetime, used markers live at least through the original object lifetime plus clock-skew buffer, session keys live no longer than idle or absolute expiry, and rate-limit counters use short policy-owned windows.
+  - Rejection workflow: handle cache miss, expired keys, duplicate challenge use, duplicate code use, Redis timeout, Redis outage, partial writes, and inconsistent Redis/PostgreSQL state. Fail closed when replay protection or atomic challenge consumption cannot be guaranteed.
+  - Edge cases: never store raw passwords, raw session cookies, raw callback codes, raw access tokens, or raw service secrets; account for stale session authorization after user or role changes; use Redis key tags if cluster multi-key atomic scripts are required.
+  - Tests first: before wiring a Redis client, use interface-backed tests for challenge TTL, challenge consume atomicity, duplicate consume rejection, session cache hit and miss fallback, logout deletion, replay marker duplicate rejection, rate-limit expiry, Redis timeout mapping, and fail-closed replay behavior.
+
+- [x] Implement PostgreSQL and Redis backends.
+  - Goal: replace purely in-memory login storage with concrete durable PostgreSQL adapters and Redis-backed volatile cache adapters while preserving testable interfaces.
+  - Migration entry point: `deploy/migrations/001_initial.up.sql` and `deploy/migrations/001_initial.down.sql`.
+  - PostgreSQL store entry point: `login.NewPostgreSQLStore(db)` implements service provider registration lookup, challenge storage, IdP session storage, and login-result code storage.
+  - PostgreSQL credential entry point: `login.NewPostgreSQLCredentialAuthenticator(db)` authenticates users from `users`, `user_identifiers`, and `user_credentials`.
+  - Redis challenge entry point: `login.NewRedisChallengeStore(client, options)` stores short-lived challenges with TTLs and uses an atomic used-marker write for duplicate consume rejection.
+  - Redis session entry point: `login.NewRedisIDPSessionStore(client, options)` stores session validation cache entries with TTL no longer than idle or absolute expiry.
+  - Redis replay entry point: `login.NewRedisReplayCache(client, options)` provides duplicate replay marker rejection for future code-exchange replay protection.
+  - Cached session workflow: `login.NewCachedIDPSessionStore(durable, cache)` writes durable sessions first, reads Redis before durable fallback, repopulates the cache after durable hits, and deletes cache entries when supported.
+  - Runtime workflow: `apps/xso-idp` uses in-memory stores by default, switches to PostgreSQL when `XSO_DATABASE_URL` is set, switches challenge storage and session caching to Redis when `XSO_REDIS_ADDR` is set, and supports `XSO_REDIS_PASSWORD`.
+  - Rejection workflow: PostgreSQL adapters map duplicate service providers, duplicate challenges, reused challenges, unknown challenges, reused login result codes, and unknown login result codes to existing typed errors. Redis adapters map duplicate challenge consumption and duplicate replay markers to typed errors.
+  - Edge cases: Redis keys always use TTLs for sensitive state; Redis stores JSON values behind namespaced keys; database login results now reference the session hash explicitly through `LoginResult.SessionID`.
+  - Tests first: added sqlmock-backed PostgreSQL tests for provider registration/lookup, credential authentication, generic missing-user rejection, and one-time challenge consumption; added miniredis-backed Redis tests for challenge TTL storage, duplicate consume rejection, session cache delete behavior, and duplicate replay marker rejection.
+  - Verification: `go test ./apps/xso-idp/...` passes.
+
+## Later Work
 
 - [ ] Add audit event model for login success, login failure, challenge rejection, and logout.
   - Goal: record security-relevant events consistently for debugging, abuse detection, and future compliance work.

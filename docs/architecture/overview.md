@@ -11,3 +11,5 @@ The first implementation should keep the system small while preserving these bou
 Core workflow references:
 
 - [Service provider registration](service-provider-registration.md)
+- [PostgreSQL schema draft](../backend/postgresql-schema.md)
+- [Redis-backed challenge and session cache design](../backend/redis-cache-design.md)

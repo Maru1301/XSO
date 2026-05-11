@@ -46,6 +46,15 @@ go run ./apps/xso-idp/cmd/xso-idp
 go run ./apps/sample-client/cmd/sample-client
 ```
 
+`xso-idp` uses in-memory stores by default. Durable/cache backends can be enabled with environment variables:
+
+```powershell
+$env:XSO_DATABASE_URL="postgres://xso:xso@localhost:5432/xso?sslmode=disable"
+$env:XSO_REDIS_ADDR="localhost:6379"
+$env:XSO_REDIS_PASSWORD=""
+go run ./apps/xso-idp/cmd/xso-idp
+```
+
 Run the Vue 3 login app:
 
 ```powershell

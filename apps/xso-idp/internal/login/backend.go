@@ -183,10 +183,68 @@ type IDPSessionStore interface {
 	FindIDPSession(ctx context.Context, id string) (IDPSession, bool, error)
 }
 
+type IDPSessionDeleter interface {
+	DeleteIDPSession(ctx context.Context, id string) error
+}
+
+type CachedIDPSessionStore struct {
+	durable IDPSessionStore
+	cache   IDPSessionStore
+}
+
+func NewCachedIDPSessionStore(durable IDPSessionStore, cache IDPSessionStore) *CachedIDPSessionStore {
+	return &CachedIDPSessionStore{durable: durable, cache: cache}
+}
+
+func (s *CachedIDPSessionStore) SaveIDPSession(ctx context.Context, session IDPSession) error {
+	if err := s.durable.SaveIDPSession(ctx, session); err != nil {
+		return err
+	}
+	if s.cache != nil {
+		_ = s.cache.SaveIDPSession(ctx, session)
+	}
+	return nil
+}
+
+func (s *CachedIDPSessionStore) FindIDPSession(ctx context.Context, id string) (IDPSession, bool, error) {
+	if s.cache != nil {
+		session, ok, err := s.cache.FindIDPSession(ctx, id)
+		if err != nil {
+			return IDPSession{}, false, err
+		}
+		if ok {
+			return session, true, nil
+		}
+	}
+
+	session, ok, err := s.durable.FindIDPSession(ctx, id)
+	if err != nil || !ok {
+		return session, ok, err
+	}
+	if s.cache != nil {
+		_ = s.cache.SaveIDPSession(ctx, session)
+	}
+	return session, true, nil
+}
+
+func (s *CachedIDPSessionStore) DeleteIDPSession(ctx context.Context, id string) error {
+	var durableErr error
+	if deleter, ok := s.durable.(IDPSessionDeleter); ok {
+		durableErr = deleter.DeleteIDPSession(ctx, id)
+	}
+	if deleter, ok := s.cache.(IDPSessionDeleter); ok {
+		if err := deleter.DeleteIDPSession(ctx, id); err != nil && durableErr == nil {
+			return err
+		}
+	}
+	return durableErr
+}
+
 type LoginResult struct {
 	Code              string
 	AccessToken       string
 	UserID            string
+	SessionID         string
 	ServiceProviderID string
 	ChallengeID       string
 	IssuedAt          time.Time
@@ -305,6 +363,7 @@ func (i *LoginResultIssuer) IssueSession(ctx context.Context, request LoginSessi
 		Code:              code,
 		AccessToken:       accessToken,
 		UserID:            request.User.ID,
+		SessionID:         sessionID,
 		ServiceProviderID: request.ServiceProviderID,
 		ChallengeID:       request.ChallengeID,
 		IssuedAt:          now,
