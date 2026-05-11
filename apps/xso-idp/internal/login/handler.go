@@ -37,11 +37,13 @@ type LoginAuthenticator interface {
 type LoginSessionRequest struct {
 	ChallengeID       string
 	ServiceProviderID string
+	ReturnURL         string
 	User              LoginUser
 }
 
 type LoginSession struct {
-	Cookies []http.Cookie
+	Cookies     []http.Cookie
+	RedirectURL string
 }
 
 type LoginSessionIssuer interface {
@@ -51,6 +53,7 @@ type LoginSessionIssuer interface {
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrUserDisabled       = errors.New("user disabled")
+	ErrUserLocked         = errors.New("user locked")
 )
 
 type LoginPageHandler struct {
@@ -218,7 +221,7 @@ func (h *LoginSubmitHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.authenticator.Authenticate(r.Context(), credentials)
 	if err != nil {
-		if errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrUserDisabled) {
+		if errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrUserDisabled) || errors.Is(err, ErrUserLocked) {
 			writeLoginError(w, http.StatusUnauthorized)
 			return
 		}
@@ -230,6 +233,7 @@ func (h *LoginSubmitHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	session, err := h.sessionIssuer.IssueSession(r.Context(), LoginSessionRequest{
 		ChallengeID:       challenge.ID,
 		ServiceProviderID: challenge.ServiceProviderID,
+		ReturnURL:         challenge.ReturnURL,
 		User:              user,
 	})
 	if err != nil {
@@ -254,7 +258,11 @@ func (h *LoginSubmitHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(loginSubmitResponse{RedirectURL: challenge.ReturnURL})
+	redirectURL := session.RedirectURL
+	if redirectURL == "" {
+		redirectURL = challenge.ReturnURL
+	}
+	_ = json.NewEncoder(w).Encode(loginSubmitResponse{RedirectURL: redirectURL})
 }
 
 func writeLoginError(w http.ResponseWriter, status int) {
@@ -263,6 +271,109 @@ func writeLoginError(w http.ResponseWriter, status int) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error": "invalid login request",
+	})
+}
+
+type LoginResultExchanger interface {
+	ExchangeLoginResultCodeForService(ctx context.Context, serviceProviderID string, code string) (LoginResult, error)
+}
+
+type LoginResultExchangeHandler struct {
+	exchanger       LoginResultExchanger
+	authenticator   ServiceProviderAuthenticator
+	maxRequestBytes int64
+}
+
+type LoginResultExchangeHandlerOptions struct {
+	MaxRequestBytes int64
+}
+
+type loginResultExchangeRequest struct {
+	ServiceProviderID string `json:"serviceProviderId"`
+	ServiceSecret     string `json:"serviceSecret"`
+	Code              string `json:"code"`
+}
+
+type loginResultExchangeResponse struct {
+	AccessToken string `json:"accessToken"`
+	TokenType   string `json:"tokenType"`
+	ExpiresIn   int64  `json:"expiresIn"`
+}
+
+func NewLoginResultExchangeHandler(exchanger LoginResultExchanger, authenticator ServiceProviderAuthenticator, options LoginResultExchangeHandlerOptions) *LoginResultExchangeHandler {
+	maxRequestBytes := options.MaxRequestBytes
+	if maxRequestBytes == 0 {
+		maxRequestBytes = 1 << 20
+	}
+
+	return &LoginResultExchangeHandler{
+		exchanger:       exchanger,
+		authenticator:   authenticator,
+		maxRequestBytes: maxRequestBytes,
+	}
+}
+
+func (h *LoginResultExchangeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.exchanger == nil || h.authenticator == nil {
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	var payload loginResultExchangeRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, h.maxRequestBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		writeTokenError(w, http.StatusBadRequest)
+		return
+	}
+
+	serviceProvider, err := h.authenticator.AuthenticateServiceProvider(r.Context(), ServiceProviderCredentials{
+		ServiceProviderID: payload.ServiceProviderID,
+		Secret:            payload.ServiceSecret,
+	})
+	if err != nil {
+		if errors.Is(err, ErrInvalidServiceProviderCredentials) {
+			writeTokenError(w, http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	result, err := h.exchanger.ExchangeLoginResultCodeForService(r.Context(), serviceProvider.ID, strings.TrimSpace(payload.Code))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrLoginResultAudienceMismatch):
+			writeTokenError(w, http.StatusForbidden)
+		case errors.Is(err, ErrUnknownLoginResultCode), errors.Is(err, ErrLoginResultCodeUsed), errors.Is(err, ErrLoginResultCodeExpired):
+			writeTokenError(w, http.StatusBadRequest)
+		default:
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(loginResultExchangeResponse{
+		AccessToken: result.AccessToken,
+		TokenType:   "Bearer",
+		ExpiresIn:   int64(result.ExpiresAt.Sub(result.IssuedAt).Seconds()),
+	})
+}
+
+func writeTokenError(w http.ResponseWriter, status int) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": "invalid token request",
 	})
 }
 

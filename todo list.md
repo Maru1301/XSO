@@ -11,6 +11,8 @@
 - [x] Edge-case rule added: identify meaningful edge cases and failure modes before implementation.
 - [x] Login page access rule added: direct navigation must be rejected by backend validation.
 - [x] Backend `POST /login` route behavior implemented behind explicit authenticator and session issuer interfaces.
+- [x] Concrete in-memory credential verification and IdP session/login-result code backend added.
+- [x] Backend login-result code exchange endpoint added for service backends.
 
 ## Active Architecture Decisions
 
@@ -53,7 +55,7 @@
   - Implemented rejection behavior: malformed JSON and missing fields return generic request errors, invalid or disabled users return a generic unauthorized error without account-existence leakage, expired or reused challenges are rejected by challenge validation, and unexpected backend failures return server errors.
   - Remaining implementation dependency: real credential storage, CSRF binding, and durable session/assertion issuance still need their own data model and backend implementations before production login can succeed outside tests.
 
-- [ ] Implement concrete credential and session backend.
+- [x] Implement concrete credential and session backend.
   - Goal: replace the current `POST /login` test doubles and unconfigured runtime wiring with a real backend-owned authentication and session/assertion implementation.
   - Entry point: provide concrete implementations of the login authenticator and session issuer interfaces used by `POST /login`.
   - Data construction: user ID, account identifiers, password verifier metadata, disabled/locked status, session ID or assertion ID, service provider ID, challenge ID, expiration timestamp, issued-at timestamp, and secure cookie attributes.
@@ -61,6 +63,23 @@
   - Session workflow: create a server-managed session or assertion record, bind it to the authenticated user and service provider, set secure `HttpOnly` cookie state when applicable, and expose only the redirect target needed by the browser.
   - Rejection workflow: reject missing users, invalid password, disabled user, locked user, expired challenge, duplicate challenge use, session persistence failure, and unsafe redirect targets with generic browser-facing errors.
   - Tests first: cover valid credential authentication, generic invalid credential behavior, disabled/locked users, password verifier failure, secure cookie attributes, session persistence failure, and no token leakage in JSON responses or browser storage.
+  - Implemented credential workflow: in-memory user accounts support multiple normalized identifiers, PBKDF2-SHA256 password verification, disabled-user rejection, locked-user rejection, and generic invalid-credential errors for both unknown accounts and bad passwords.
+  - Implemented IdP session workflow: successful login creates an opaque server-side IdP session with an 8-hour absolute lifetime, 30-minute idle expiry metadata, and a secure `HttpOnly` `SameSite=Lax` cookie.
+  - Implemented login-result workflow: successful login creates a short-lived opaque access token server-side and returns only a one-time `code` in the browser redirect URL. The access token is exchanged by backend code through the login-result exchange API and is not exposed to the Vue page, JSON response, local storage, or callback URL.
+  - Remaining implementation dependency: the current stores are in-memory and the runtime authenticator has no configured users yet. Durable user/session/login-result storage and an HTTP or gRPC code-exchange endpoint still need to be added.
+
+- [x] Add backend login-result code exchange endpoint.
+  - Goal: let a registered service backend exchange the browser callback `code` for the server-side access token created by XSO.
+  - Entry point: service backend calls XSO after receiving the user callback with `code`.
+  - Request data: service provider identity, one-time code, and service authentication material once service registration credentials exist.
+  - Exchange workflow: authenticate the service provider, load the login result by code, verify it exists, verify it is not expired, verify it is not used, verify the audience matches the service provider, mark the code as used atomically, and return the access token only to the service backend.
+  - Rejection workflow: reject missing code, unknown code, expired code, reused code, wrong service provider, inactive service provider, and unauthenticated service callers without leaking token material.
+  - Tests first: cover successful exchange, missing/unknown code rejection, expired code rejection, replay rejection, wrong audience rejection, inactive service rejection, and no access token in browser-facing responses.
+  - Implemented endpoint: `POST /login/token` accepts service provider ID, service secret, and one-time code from a service backend.
+  - Implemented service authentication workflow: service providers use backend-owned secret verification; unknown services, inactive services, and bad secrets are rejected with generic unauthorized errors.
+  - Implemented audience workflow: codes can only be exchanged by the service provider they were issued for, and wrong-audience attempts do not consume the code.
+  - Implemented token response workflow: successful exchange marks the code as used and returns the access token only in the backend token response, with `tokenType` and `expiresIn`.
+  - Remaining implementation dependency: service provider registration still needs to create and persist service secrets; current runtime stores are in-memory and empty until registration/configuration is added.
 
 - [ ] Define the full service provider registration workflow.
   - Goal: a new service must be registered with XSO before it can send users into the SSO login flow.

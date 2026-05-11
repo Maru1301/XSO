@@ -11,10 +11,18 @@ import (
 
 func main() {
 	loginDistDir := filepath.Clean("frontend/xso-login/dist")
+	providerStore := login.NewMemoryServiceProviderStore(nil)
 	challengeService := login.NewChallengeService(
-		login.NewMemoryServiceProviderStore(nil),
+		providerStore,
 		login.NewMemoryChallengeStore(),
 		login.ChallengeServiceOptions{},
+	)
+	authenticator := login.NewMemoryCredentialAuthenticator(nil)
+	serviceAuthenticator := login.NewMemoryServiceProviderAuthenticator(providerStore)
+	sessionIssuer := login.NewLoginResultIssuer(
+		login.NewMemoryIDPSessionStore(),
+		login.NewMemoryLoginResultStore(),
+		login.LoginResultIssuerOptions{},
 	)
 
 	mux := http.NewServeMux()
@@ -26,8 +34,9 @@ func main() {
 		login.NewLoginPageHandler(challengeService, login.LoginPageHandlerOptions{
 			DistDir: loginDistDir,
 		}),
-		login.NewLoginSubmitHandler(challengeService, nil, nil, login.LoginSubmitHandlerOptions{}),
+		login.NewLoginSubmitHandler(challengeService, authenticator, sessionIssuer, login.LoginSubmitHandlerOptions{}),
 	))
+	mux.Handle("/login/token", login.NewLoginResultExchangeHandler(sessionIssuer, serviceAuthenticator, login.LoginResultExchangeHandlerOptions{}))
 	mux.Handle("/login-assets/", login.NewLoginAssetHandler(loginDistDir))
 
 	server := &http.Server{

@@ -37,6 +37,7 @@ type ServiceProvider struct {
 	DisplayName       string
 	AllowedReturnURLs []string
 	Active            bool
+	SecretHash        PasswordHash
 }
 
 type ServiceProviderStore interface {
