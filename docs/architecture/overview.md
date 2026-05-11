@@ -7,3 +7,7 @@ XSO is designed as a hybrid authentication platform:
 - The login frontend is hosted by XSO and must stay outside internal service logic.
 
 The first implementation should keep the system small while preserving these boundaries.
+
+Core workflow references:
+
+- [Service provider registration](service-provider-registration.md)

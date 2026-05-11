@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -11,7 +12,9 @@ import (
 
 func main() {
 	loginDistDir := filepath.Clean("frontend/xso-login/dist")
+	adminToken := os.Getenv("XSO_ADMIN_TOKEN")
 	providerStore := login.NewMemoryServiceProviderStore(nil)
+	serviceProviderRegistrar := login.NewServiceProviderRegistrationService(providerStore, login.ServiceProviderRegistrationOptions{})
 	challengeService := login.NewChallengeService(
 		providerStore,
 		login.NewMemoryChallengeStore(),
@@ -30,6 +33,11 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	mux.Handle("/admin/service-providers", login.NewServiceProviderRegistrationHandler(
+		serviceProviderRegistrar,
+		login.StaticAdminAuthenticator(adminToken),
+		login.ServiceProviderRegistrationHandlerOptions{},
+	))
 	mux.Handle("/login", login.NewLoginHandler(
 		login.NewLoginPageHandler(challengeService, login.LoginPageHandlerOptions{
 			DistDir: loginDistDir,

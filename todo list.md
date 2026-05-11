@@ -13,6 +13,8 @@
 - [x] Backend `POST /login` route behavior implemented behind explicit authenticator and session issuer interfaces.
 - [x] Concrete in-memory credential verification and IdP session/login-result code backend added.
 - [x] Backend login-result code exchange endpoint added for service backends.
+- [x] Full service provider registration workflow defined in `docs/architecture/service-provider-registration.md`.
+- [x] Backend admin service provider registration implemented with in-memory storage.
 
 ## Active Architecture Decisions
 
@@ -81,14 +83,36 @@
   - Implemented token response workflow: successful exchange marks the code as used and returns the access token only in the backend token response, with `tokenType` and `expiresIn`.
   - Remaining implementation dependency: service provider registration still needs to create and persist service secrets; current runtime stores are in-memory and empty until registration/configuration is added.
 
-- [ ] Define the full service provider registration workflow.
+- [x] Define the full service provider registration workflow.
   - Goal: a new service must be registered with XSO before it can send users into the SSO login flow.
-  - Registration entry point: start with a backend/admin API such as `POST /admin/service-providers`; add an admin UI later.
-  - Registration data: service provider ID, display name, allowed return URLs, active status, created/updated timestamps.
-  - Storage workflow: validate registration input, reject duplicate service provider IDs, persist the service provider, and make it available to login challenge validation.
-  - Login challenge workflow: service redirects an unauthenticated user to XSO with service provider ID and return target; XSO loads the registered service provider, validates active status, validates the return URL, creates a challenge, then allows the login page to render.
-  - Rejection workflow: XSO rejects unknown service providers, inactive service providers, mismatched return URLs, expired challenges, reused challenges, and direct login page access without a challenge.
-  - Tests first: cover successful registration, duplicate registration rejection, valid challenge creation, unknown service rejection, inactive service rejection, unsafe return URL rejection, and direct login access rejection.
+  - Workflow document: `docs/architecture/service-provider-registration.md`.
+  - Registration entry point: start with backend/admin API `POST /admin/service-providers`; add an admin UI later. Browser users and service frontends must not self-register services.
+  - Admin boundary: the registration endpoint is a control-plane API and must authenticate the administrator before reading or persisting registration data.
+  - Data construction: service provider ID, display name, allowed return URLs, active status, service secret verifier, created timestamp, and updated timestamp.
+  - Secret workflow: accept the raw service secret only during registration or future rotation, hash it with the backend password verifier strategy, persist only the verifier, and never return the raw secret in API responses.
+  - Registration validation workflow: normalize or strictly validate the service provider ID, require a display name, require at least one allowed return URL, reject invalid or duplicate return URLs, require a strong service secret, reject duplicate service provider IDs, then persist the service provider record.
+  - Storage workflow: persist the service provider so challenge creation and service-provider authentication both read the same source of truth.
+  - Login challenge workflow: service redirects an unauthenticated user to XSO with service provider ID and return target, or calls a future backend challenge API; XSO loads the registered service provider, validates active status, validates exact return URL match, creates a short-lived challenge, then allows `GET /login?challenge=...` to render.
+  - Login result workflow: after successful login, XSO redirects the browser back with only a one-time code; the service backend calls `POST /login/token` with service provider ID, service secret, and code; XSO authenticates the service, verifies audience and replay state, marks the code used, and returns the access token only to the service backend.
+  - Rejection workflow: reject unauthenticated admin requests, duplicate service IDs, missing data, invalid return URLs, weak secrets, unknown services, inactive services, mismatched return URLs, expired or reused challenges, direct login access without a challenge, wrong-audience code exchange, and token exposure to browser-facing responses.
+  - Edge cases: service provider ID normalization, exact return URL matching, secret rotation as a separate workflow, immediate challenge/exchange blocking after service disablement, and future audit events without secret leakage.
+  - Tests first for implementation: cover successful registration, duplicate registration rejection, missing fields, invalid and duplicate return URLs, weak secret rejection, active service challenge creation, inactive service challenge rejection, own-code exchange, wrong-service exchange rejection, and no secret in responses.
+
+- [x] Implement backend admin service provider registration.
+  - Goal: convert the defined workflow into backend-owned registration code that populates the service provider store used by challenge creation and token exchange.
+  - Entry point: `POST /admin/service-providers` in `apps/xso-idp`, protected by an explicit admin authentication boundary.
+  - Request data: service provider ID, display name, allowed return URLs, active status, and initial service secret.
+  - Response data: service provider ID, display name, normalized allowed return URLs, active status, created timestamp, and updated timestamp. The raw secret and secret verifier must not be returned.
+  - Store changes: add a save/register operation to the service provider store while preserving duplicate-ID protection.
+  - Hashing workflow: generate a unique salt for each service secret, create the PBKDF2-SHA256 verifier, persist verifier bytes only, and make `POST /login/token` authenticate against that verifier.
+  - Admin validation workflow: authenticate admin request first, reject malformed JSON, reject missing fields, reject duplicate IDs, reject invalid return URLs, reject weak secrets, and map failures to non-leaky HTTP responses.
+  - Runtime wiring: create registered services through the admin endpoint so `CreateChallenge`, `GET /login`, `POST /login`, and `POST /login/token` all operate from shared provider data.
+  - Tests first: add failing tests for registration success, duplicate ID, invalid URL, weak secret, secret non-disclosure, registered-service challenge creation, and token exchange using the registered secret.
+  - Implemented service workflow: `ServiceProviderRegistrationService` validates lowercase-style service IDs, display names, exact HTTPS return URLs, duplicate return URLs, and minimum service secret length before hashing the secret and storing the provider.
+  - Implemented admin route: `POST /admin/service-providers` requires `Authorization: Bearer <token>` checked by `StaticAdminAuthenticator`; runtime token comes from `XSO_ADMIN_TOKEN`.
+  - Implemented response behavior: success returns metadata only and never returns the raw service secret or verifier.
+  - Implemented store integration: `MemoryServiceProviderStore` now registers providers with duplicate-ID protection, and the same store backs challenge validation and service-provider token exchange authentication.
+  - Remaining implementation dependency: registration is still in-memory and uses a static admin token. Durable provider storage, service-secret rotation, admin-user authorization, and audit events remain future work.
 
 - [ ] Add frontend tests for login page states.
   - Goal: verify the Vue login page handles user-visible states correctly while leaving all security decisions to backend validation.

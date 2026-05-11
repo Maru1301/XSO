@@ -38,10 +38,17 @@ type ServiceProvider struct {
 	AllowedReturnURLs []string
 	Active            bool
 	SecretHash        PasswordHash
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type ServiceProviderStore interface {
 	FindServiceProvider(ctx context.Context, id string) (ServiceProvider, bool, error)
+}
+
+type ServiceProviderRegistry interface {
+	ServiceProviderStore
+	RegisterServiceProvider(ctx context.Context, provider ServiceProvider) error
 }
 
 type ChallengeStore interface {
@@ -229,6 +236,18 @@ func (s *MemoryServiceProviderStore) FindServiceProvider(_ context.Context, id s
 
 	provider, ok := s.providers[id]
 	return provider, ok, nil
+}
+
+func (s *MemoryServiceProviderStore) RegisterServiceProvider(_ context.Context, provider ServiceProvider) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.providers[provider.ID]; exists {
+		return ErrDuplicateServiceProvider
+	}
+
+	s.providers[provider.ID] = provider
+	return nil
 }
 
 type MemoryChallengeStore struct {
