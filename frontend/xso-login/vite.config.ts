@@ -4,4 +4,7 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   base: '/login-assets/',
   plugins: [vue()],
+  test: {
+    environment: 'jsdom',
+  },
 })

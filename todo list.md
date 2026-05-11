@@ -114,7 +114,7 @@
   - Implemented store integration: `MemoryServiceProviderStore` now registers providers with duplicate-ID protection, and the same store backs challenge validation and service-provider token exchange authentication.
   - Remaining implementation dependency: registration is still in-memory and uses a static admin token. Durable provider storage, service-secret rotation, admin-user authorization, and audit events remain future work.
 
-- [ ] Add frontend tests for login page states.
+- [x] Add frontend tests for login page states.
   - Goal: verify the Vue login page handles user-visible states correctly while leaving all security decisions to backend validation.
   - Test entry point: component tests for `App.vue`, using mocked `fetch` responses and browser APIs.
   - UI states: initial form, client-side missing field validation, submitting/disabled state, invalid credentials, service unavailable, and successful redirect.
@@ -122,6 +122,9 @@
   - Accessibility workflow: labels remain associated with inputs, errors use an alert region, and submit state is visible to assistive technology.
   - Rejection workflow: backend failure must show a generic message and must not expose internal error codes, stack traces, or account-existence details.
   - Tests first: cover initial render, required field handling, submit disabled while pending, password clearing after failure, generic error display, successful redirect, and no browser-storage token writes.
+  - Implemented test runner: added Vitest, Vue Test Utils, jsdom, and `npm run test` for `frontend/xso-login`.
+  - Implemented coverage: tests verify initial render, required-field validation without backend calls, pending disabled state, trimmed identifier submission with challenge ID and `credentials: include`, password clearing after invalid credentials, generic network/service error, redirect to backend-provided URL, missing redirect URL handling, and no writes to browser storage.
+  - Verification: `npm run test` and `npm run build` pass from `frontend/xso-login`.
 
 - [ ] Replace placeholder SDK session validation with a real interface.
   - Goal: make `packages/xso-go` validate sessions through an explicit backend boundary instead of hardcoded placeholder behavior.
